@@ -89,9 +89,11 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
             input_ext = input_path.suffix.strip().lower()
             if input_ext in {'.cue', '.gdi'}:
                 output_format = 'cd'
-            elif input_ext == '.iso': # assume all `.iso` files are DVD (rather than checking if filesize >= 783,216,000 bytes)
+            elif input_path.stat().st_size >= 783216000: 
                 output_format = 'dvd'
-            else: # default to CD
+            elif input_ext == '.iso': # assume all `.iso` files are DVD (even if size is below 783 MB); might want to change this in the future
+                output_format = 'dvd'
+            else: # default to CD (seemingly most compatibility)a
                 output_format = 'cd'
 
         # run `chdman.exe` to compress
