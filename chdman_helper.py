@@ -21,6 +21,7 @@ def parse_args():
     # set up program-level arguments
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--chdman_path', required=False, type=str, default=DEFAULT_CHDMAN_PATH, help="Path to chdman.exe")
+    parser.add_argument('--dryrun', action="store_true", help="Print Commands (instead of running)")
 
     # set up sub-parsers
     sub_parsers = parser.add_subparsers(dest='command', required=True)
@@ -57,31 +58,34 @@ def parse_args():
     return args
 
 # compress
-def run_compress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH):
+def run_compress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
     raise NotImplementedError("compress") # TODO
 
 # decompress
-def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH):
+def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
     raise NotImplementedError("decompress") # TODO
 
 # info
-def run_info(input_path, chdman_path=DEFAULT_CHDMAN_PATH, verbose=False, print_header=True):
+def run_info(input_path, chdman_path=DEFAULT_CHDMAN_PATH, verbose=False, print_header=True, dryrun=False):
     if input_path.is_file():
         if input_path.suffix.strip().lower() != '.chd':
             raise ValueError("Input file must be CHD: %s" % input_path)
         command = [chdman_path, 'info', '--input', input_path]
         if verbose:
             command.append('--verbose')
-        proc = run(command, capture_output=True)
-        out = [[v.strip() for v in l.split(':')] for l in proc.stdout.decode().splitlines() if ': ' in l]
-        if print_header:
-            print('\t'.join(k for k,v in out))
-        print('\t'.join(v for k,v in out))
+        if dryrun:
+            print(' '.join(str(x) for x in command))
+        else:
+            proc = run(command, capture_output=True)
+            out = [[v.strip() for v in l.split(':')] for l in proc.stdout.decode().splitlines() if ': ' in l]
+            if print_header:
+                print('\t'.join(k for k,v in out))
+            print('\t'.join(v for k,v in out))
     elif input_path.is_dir():
         count = 0
         for p in input_path.rglob('*'):
             if p.is_file() and p.suffix.strip().lower() == '.chd':
-                run_info(p, chdman_path=chdman_path, verbose=verbose, print_header=(count == 0))
+                run_info(p, chdman_path=chdman_path, verbose=verbose, print_header=(count == 0), dryrun=dryrun)
                 count += 1
     else:
         raise ValueError("Input path not found: %s" % input_path)
@@ -90,11 +94,11 @@ def run_info(input_path, chdman_path=DEFAULT_CHDMAN_PATH, verbose=False, print_h
 def main():
     args = parse_args()
     if args.command == 'compress':
-        run_compress(input_path=args.input, output_path=args.output, chdman_path=args.chdman_path)
+        run_compress(input_path=args.input, output_path=args.output, chdman_path=args.chdman_path, dryrun=args.dryrun)
     elif args.command == 'decompress':
-        run_decompress(input_path=args.input, output_path=args.output, chdman_path=args.chdman_path)
+        run_decompress(input_path=args.input, output_path=args.output, chdman_path=args.chdman_path, dryrun=args.dryrun)
     elif args.command == 'info':
-        run_info(input_path=args.input, chdman_path=args.chdman_path, verbose=args.verbose)
+        run_info(input_path=args.input, chdman_path=args.chdman_path, verbose=args.verbose, dryrun=args.dryrun)
     else:
         raise ValueError("Invalid command: %s" % args.command)
 
