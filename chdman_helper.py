@@ -9,11 +9,13 @@ from subprocess import run
 import argparse
 
 # constants
-CHDMAN_COMPRESS_INPUT_EXTS = {'.cue', '.gdi', '.iso'}
-CHDMAN_COMPRESS_FORMATS = {'auto', 'cd', 'dvd', 'hd', 'ld', 'raw'}
-DEFAULT_CHDMAN_PATH = None
+CHDMAN_COMPRESS_FORMATS = {'auto', 'cd', 'dvd', 'ld', 'raw'}
+DISC_IMAGE_EXTS = {'.cue', '.gdi', '.iso'}
+FORMAT_TO_EXT = {'cd':'.cue', 'dvd':'.iso', 'ld':'.avi', 'raw':'.raw'}
+TAG_TO_FORMAT = {'CHT2':'cd', 'DVD':'dvd'}
 
 # find default chdman.exe path if it exists
+DEFAULT_CHDMAN_PATH = None
 tmp = sorted(Path(__file__).parent.glob('chdman*.exe'))
 if len(tmp) != 0:
     DEFAULT_CHDMAN_PATH = tmp[-1].resolve()
@@ -73,7 +75,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
 
     # input is a file, so run `chdman.exe` to compress to `.chd`
     if input_path.is_file():
-        if input_path.suffix.strip().lower() not in CHDMAN_COMPRESS_INPUT_EXTS:
+        if input_path.suffix.strip().lower() not in DISC_IMAGE_EXTS:
             raise ValueError("Invalid input file extension: %s" % input_path)
 
         # determine output file path
@@ -89,7 +91,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
             else:
                 output_format = 'dvd'
 
-        # determine `chdman.exe` command
+        # run `chdman.exe` to compress
         command = [chdman_path, 'create%s' % output_format, '--input', input_path, '--output', output_chd_path]
         print(' '.join(str(x) for x in command))
         if not dryrun:
@@ -101,7 +103,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
         if output_path.suffix.strip().lower() == '.chd':
             raise ValueError("Input path was a directory, so output path must be a directory as well: %s" % output_path)
         for p in input_path.rglob('*.*'):
-            if p.is_file() and p.suffix.strip().lower() in CHDMAN_COMPRESS_INPUT_EXTS:
+            if p.is_file() and p.suffix.strip().lower() in DISC_IMAGE_EXTS:
                 run_compress(
                     p,
                     output_path,
@@ -109,10 +111,67 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
                     chdman_path=chdman_path,
                     dryrun=dryrun,
                 )
+    else:
+        raise ValueError("Input path not found: %s" % input_path)
 
 # decompress
 def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
-    raise NotImplementedError("decompress") # TODO
+    # first check and handle output
+    if output_path.is_file():
+        raise ValueError("Output file exists: %s" % args.output)
+    if output_path.suffix.strip().lower() not in DISC_IMAGE_EXTS:
+        if dryrun:
+            print('mkdir -p %s' % output_path)
+        else:
+            output_path.mkdir(parents=True, exist_ok=True)
+
+    # input is a file, so run `chdman.exe` to decompress a `.chd`
+    if input_path.is_file():
+        if input_path.suffix.strip().lower() != '.chd':
+            raise ValueError("Input file must be a CHD: %s" % input_path)
+
+        # infer output format from CHD
+        output_format = None
+        command_info = [chdman_path, 'info', '--input', input_path]
+        print(' '.join(str(x) for x in command_info))
+        proc = run(command_info, capture_output=True)
+        for line in proc.stdout.decode().splitlines():
+            if line.startswith('Metadata:'):
+                try:
+                    output_format = TAG_TO_FORMAT[line.split("Tag='")[1].split("'")[0].strip().upper()]
+                    break
+                except:
+                    pass
+        if output_format is None:
+            raise ValueError("Unable to infer image format: %s" % input_path)
+        if output_path.suffix.strip().lower() in DISC_IMAGE_EXTS:
+            output_img_path = output_path
+        else:
+            output_img_path = (output_path / input_path.stem).with_suffix(FORMAT_TO_EXT[output_format])
+
+        # run `chdman.exe` to decompress
+        command = [chdman_path, 'extract%s' % output_format, '--input', input_path, '--output', output_img_path]
+        if output_format == 'cd':
+            command += ['--outputbin', (output_img_path.parent / output_img_path.stem).with_suffix('.bin')]
+        print(' '.join(str(x) for x in command))
+        if not dryrun:
+            run(command)
+            print()
+
+    # input is a directory, so recurse on all `.chd` files
+    elif input_path.is_dir():
+        if output_path.suffix.strip().lower() in DISC_IMAGE_EXTS:
+            raise ValueError("Input path was a directory, so output path must be a directory as well: %s" % output_path)
+        for p in input_path.rglob('*.*'):
+            if p.is_file() and p.suffix.strip().lower() == '.chd':
+                run_decompress(
+                    p,
+                    output_path=output_path,
+                    chdman_path=chdman_path,
+                    dryrun=dryrun,
+                )
+    else:
+        raise ValueError("Input path not found: %s" % input_path)
 
 # info
 def run_info(input_path, chdman_path=DEFAULT_CHDMAN_PATH, verbose=False, print_header=True, dryrun=False):
