@@ -37,10 +37,12 @@ def parse_args():
     parser_compress.add_argument('-i', '--input', required=True, type=str, help="Input File/Folder")
     parser_compress.add_argument('-o', '--output', required=True, type=str, help="Output File/Folder")
     parser_compress.add_argument('-f', '--format', required=False, type=str, default='auto', help="Output CHD Format (options: %s)" % ', '.join(sorted(CHDMAN_COMPRESS_FORMATS)))
+    parser_compress.add_argument('-d', '--delete_input', action="store_true", help="Delete Input Files Upon Successful Compression")
 
     # set up `decompress` arguments
     parser_decompress.add_argument('-i', '--input', required=True, type=str, help="Input File/Folder")
     parser_decompress.add_argument('-o', '--output', required=True, type=str, help="Output File/Folder")
+    parser_decompress.add_argument('-d', '--delete_input', action="store_true", help="Delete Input Files Upon Successful Decompression")
 
     # set up `info` arguments
     parser_info.add_argument('-i', '--input', required=True, type=str, help="Input File/Folder")
@@ -63,8 +65,9 @@ def parse_args():
     return args
 
 # compress
-def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
-    # first check and handle output
+def run_compress(input_path, output_path, output_format='auto', delete_input=False, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
+    # first check and handle input/output
+    input_ext = input_path.suffix.strip().lower()
     if output_path.is_file():
         raise ValueError("Output file exists: %s" % args.output)
     if output_path.suffix.strip().lower() != '.chd':
@@ -75,7 +78,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
 
     # input is a file, so run `chdman.exe` to compress to `.chd`
     if input_path.is_file():
-        if input_path.suffix.strip().lower() not in DISC_IMAGE_EXTS:
+        if input_ext not in DISC_IMAGE_EXTS:
             raise ValueError("Invalid input file extension: %s" % input_path)
 
         # determine output file path
@@ -86,21 +89,30 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
 
         # determine output CHD format (might need to make the logic more complex here)
         if output_format == 'auto':
-            input_ext = input_path.suffix.strip().lower()
             if input_ext in {'.cue', '.gdi'}:
                 output_format = 'cd'
             elif input_path.stat().st_size >= 783216000: 
                 output_format = 'dvd'
             elif input_ext == '.iso': # assume all `.iso` files are DVD (even if size is below 783 MB); might want to change this in the future
                 output_format = 'dvd'
-            else: # default to CD (seemingly most compatibility)a
+            else: # default to CD (seemingly most compatibility)
                 output_format = 'cd'
 
         # run `chdman.exe` to compress
         command = [chdman_path, 'create%s' % output_format, '--input', input_path, '--output', output_chd_path]
         print(' '.join(str(x) for x in command))
         if not dryrun:
-            run(command)
+            proc = run(command)
+            if delete_input and proc.returncode == 0:
+                if input_ext == '.cue':
+                    for l in open(input_path):
+                        if l.startswith('FILE'):
+                            if '"' in l:
+                                fn = l.split('"')[1]
+                            else:
+                                fn = l.split()[1].strip()
+                            (input_path.parent / fn).unlink(missing_ok=True)
+                input_path.unlink(missing_ok=True)
             print()
 
     # input is a directory, so recurse on all disc image files
@@ -113,6 +125,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
                     p,
                     output_path,
                     output_format=output_format,
+                    delete_input=delete_input,
                     chdman_path=chdman_path,
                     dryrun=dryrun,
                 )
@@ -120,7 +133,7 @@ def run_compress(input_path, output_path, output_format='auto', chdman_path=DEFA
         raise ValueError("Input path not found: %s" % input_path)
 
 # decompress
-def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
+def run_decompress(input_path, output_path, delete_input=False, chdman_path=DEFAULT_CHDMAN_PATH, dryrun=False):
     # first check and handle output
     if output_path.is_file():
         raise ValueError("Output file exists: %s" % args.output)
@@ -149,7 +162,10 @@ def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dry
                     pass
         if output_format is None:
             raise ValueError("Unable to infer image format: %s" % input_path)
-        if output_path.suffix.strip().lower() in DISC_IMAGE_EXTS:
+        output_path_ext = output_path.suffix.strip().lower()
+        if output_path_ext in DISC_IMAGE_EXTS:
+            if output_format == 'cd' and output_path_ext != '.cue':
+                raise ValueError("Output file extension must be .cue when decompressing CD CHD files: %s" % input_path)
             output_img_path = output_path
         else:
             output_img_path = (output_path / input_path.stem).with_suffix(FORMAT_TO_EXT[output_format])
@@ -160,7 +176,9 @@ def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dry
             command += ['--outputbin', (output_img_path.parent / output_img_path.stem).with_suffix('.bin')]
         print(' '.join(str(x) for x in command))
         if not dryrun:
-            run(command)
+            proc = run(command)
+            if delete_input and proc.returncode == 0:
+                input_path.unlink(missing_ok=True)
             print()
 
     # input is a directory, so recurse on all `.chd` files
@@ -172,6 +190,7 @@ def run_decompress(input_path, output_path, chdman_path=DEFAULT_CHDMAN_PATH, dry
                 run_decompress(
                     p,
                     output_path=output_path,
+                    delete_input=delete_input,
                     chdman_path=chdman_path,
                     dryrun=dryrun,
                 )
@@ -220,6 +239,7 @@ def main():
             input_path=args.input,
             output_path=args.output,
             output_format=args.format,
+            delete_input=args.delete_input,
             chdman_path=args.chdman_path,
             dryrun=args.dryrun,
         )
@@ -227,6 +247,7 @@ def main():
         run_decompress(
             input_path=args.input,
             output_path=args.output,
+            delete_input=args.delete_input,
             chdman_path=args.chdman_path,
             dryrun=args.dryrun,
         )
