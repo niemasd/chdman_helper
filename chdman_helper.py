@@ -85,7 +85,7 @@ def run_compress(input_path, output_path, output_format='auto', delete_input=Fal
         if output_path.suffix.strip().lower() == '.chd':
             output_chd_path = output_path
         else:
-            output_chd_path = (output_path / input_path.stem).with_suffix('.chd')
+            output_chd_path = (output_path / ('.'.join(input_path.name.split('.')[:-1]) + '.chd'))
 
         # determine output CHD format (might need to make the logic more complex here)
         if output_format == 'auto':
@@ -168,7 +168,7 @@ def run_decompress(input_path, output_path, delete_input=False, chdman_path=DEFA
                 raise ValueError("Output file extension must be .cue when decompressing CD CHD files: %s" % input_path)
             output_img_path = output_path
         else:
-            output_img_path = (output_path / input_path.stem).with_suffix(FORMAT_TO_EXT[output_format])
+            output_img_path = (output_path / ('.'.join(input_path.name.split('.')[:-1]) + FORMAT_TO_EXT[output_format]))
 
         # run `chdman.exe` to decompress
         command = [chdman_path, 'extract%s' % output_format, '--input', input_path, '--output', output_img_path]
